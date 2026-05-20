@@ -1,123 +1,129 @@
-# CC Voice Chat
+# CC Intercom
 
-Stream your microphone audio into ComputerCraft speakers in real-time using a Cloudflare Quick Tunnel.
+One-way voice intercom: your PC microphone → ComputerCraft speaker.  
+A Cloudflare Quick Tunnel is created automatically so the CC computer can connect from any world, server, or machine without port-forwarding.
 
 ```
-[Your PC mic] → Python server → Cloudflare Tunnel → CC WebSocket → Speaker
+[ PC microphone ]
+       │  sounddevice (48 kHz PCM)
+       ▼
+[ Python companion app ]
+       │  WebSocket (binary PCM frames)
+       ▼
+[ Cloudflare Quick Tunnel ]  ──  wss://xxxx.trycloudflare.com
+       │
+       ▼
+[ CC computer ] → speaker.playAudio()
 ```
 
 ---
 
 ## Requirements
 
-| Component | Requirement |
-|-----------|-------------|
-| Python | 3.8 or newer |
-| Minecraft | CC:Tweaked 1.100+ (Minecraft 1.19+) |
-| In-game | A **Speaker** block attached to your ComputerCraft computer |
-| Tool | [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) on your system PATH |
+### PC side
+
+| Requirement | Notes |
+|---|---|
+| Python 3.10+ | |
+| `cloudflared` binary | [Download here](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) – add it to your `PATH` |
+
+### Minecraft / CC side
+
+| Requirement | Notes |
+|---|---|
+| CC: Tweaked **≥ 1.100.0** | Needed for `speaker.playAudio` |
+| **Speaker** peripheral | Attach one to (or place adjacent to) the computer |
+| HTTP enabled | Default in most modpacks; check `computercraft.toml` if unsure |
 
 ---
 
 ## Setup
 
-### 1 — Install cloudflared
+### 1 – Install Python dependencies
 
-Download the Windows binary from the Cloudflare page above and place `cloudflared.exe` somewhere on your PATH (e.g. `C:\Windows\System32` or any folder in your PATH).  
-No account or login is needed for Quick Tunnels.
+```powershell
+cd companion
+pip install -r requirements.txt
+```
 
-### 2 — Start the companion server
+### 2 – Install cloudflared
 
-Double-click `companion\start.bat`.  
+Download the Windows executable from the link above and either:
+- place it in a folder that is already on your `PATH`, or
+- add its folder to `PATH` via *System → Advanced → Environment Variables*.
+
+Verify with:
+
+```powershell
+cloudflared --version
+```
+
+### 3 – Copy the Lua script to your CC computer
+
+Options:
+- **Pastebin** – upload `computercraft/intercom.lua` and run `pastebin get <id> intercom` in-game.
+- **Singleplayer / LAN** – use a mod like [CC: Remote Files](https://modrinth.com/mod/cc-remote) or copy the file directly into the computer's save folder:
+  `saves/<world>/computercraft/computer/<id>/intercom.lua`
+
+---
+
+## Running
+
+### Step 1 – Start the companion app (PC)
+
+```powershell
+cd companion
+python intercom_server.py
+```
+
 It will:
-- Install Python dependencies automatically
-- Start the WebSocket server on `ws://localhost:8765`
-- Launch `cloudflared` in a second window and print a URL like:
+1. List available microphone devices and ask you to choose one.
+2. Start a local WebSocket server on port `8765`.
+3. Launch a Cloudflare Quick Tunnel and print a URL like:
 
 ```
-https://abc-randomly-generated.trycloudflare.com
+────────────────────────────────────────────────────────────
+  Enter this URL in the CC Intercom script:
+  wss://random-words-here.trycloudflare.com
+────────────────────────────────────────────────────────────
 ```
 
-Keep **both** windows open while playing.
+> The tunnel URL changes every time you restart the app.
 
-### 3 — Copy the CC script to your computer
-
-Copy `computercraft\voice_client.lua` into your Minecraft save's `computer/<id>/` folder, or use an in-game method like `wget` / `pastebin`.
-
-In-game wget example (if you host the file somewhere):
-```
-wget https://your-host/voice_client.lua voice_client.lua
-```
-
-### 4 — Run the CC script
-
-On your ComputerCraft computer (with a Speaker attached):
-```
-voice_client
-```
-
-When prompted, paste the `wss://` URL from the cloudflared window (replace `https://` with `wss://`):
+### Step 2 – Run the Lua script in-game
 
 ```
-URL> wss://abc-randomly-generated.trycloudflare.com
+intercom
 ```
 
-The URL is saved to `voice_url.txt` and reused on next run.
+Paste the `wss://` URL when prompted and press Enter.  
+Audio from your microphone will play through the in-game speaker in real time.
 
----
-
-## Server config (multiplayer)
-
-If you are on a server, the server admin must allow WebSocket connections in `computercraft-tweaked.toml`:
-
-```toml
-[http]
-    enabled = true
-    websocket_enabled = true
-    # Allow all outbound connections (default); or add the Cloudflare domain explicitly:
-    # rules = [{ host = "*.trycloudflare.com", action = "allow" }]
-```
-
----
-
-## Audio details
-
-| Property | Value |
-|----------|-------|
-| Sample rate | 48 000 Hz |
-| Channels | Mono |
-| Bit depth | 8-bit signed PCM |
-| Chunk size | 4 800 samples (100 ms) |
+Press **Ctrl+T** in-game to disconnect.  
+Press **Ctrl+C** in the companion app terminal to stop streaming.
 
 ---
 
 ## Troubleshooting
 
-**"No Speaker peripheral found"**  
-→ Make sure a Speaker block is placed directly adjacent to (or wired to) your CC computer.
-
-**"WebSocket connection failed"**  
-→ Check the cloudflared window is still running and the URL matches exactly.  
-→ Ensure `http.websocket_enabled = true` in the server config.
-
-**Choppy / delayed audio**  
-→ Try reducing chunk size in `server.py` (`CHUNK_SAMPLES = 2400` for 50 ms).  
-→ Ensure a stable internet connection — Quick Tunnels route through Cloudflare's global network.
-
-**Wrong microphone**  
-→ Change the default recording device in Windows Sound Settings → Recording.
+| Symptom | Fix |
+|---|---|
+| `No speaker peripheral found` | Attach a Speaker block to the computer (any side) |
+| `Connection failed: …` | Make sure the companion app is running and the URL was copied correctly |
+| Audio plays too fast / wrong pitch | You are using a CC: Tweaked version older than 1.100 that does not support `speaker.playAudio` with PCM data |
+| Choppy audio | Your network latency to the Cloudflare PoP is high; try reducing `CHUNK_FRAMES` in `intercom_server.py` to `2400` (50 ms chunks) |
+| `cloudflared` not found | Ensure the binary is in `PATH` and the terminal session was restarted after updating `PATH` |
+| Audio input device not listed | Check Windows sound settings; make sure the mic is not disabled |
 
 ---
 
-## File structure
+## File layout
 
 ```
 ccvc/
 ├── companion/
-│   ├── server.py          # Python WebSocket + mic capture server
-│   ├── requirements.txt   # Python dependencies
-│   └── start.bat          # One-click launcher (Windows)
-├── computercraft/
-│   └── voice_client.lua   # CC:Tweaked script
-└── README.md
+│   ├── intercom_server.py   # Python companion app
+│   └── requirements.txt
+└── computercraft/
+    └── intercom.lua         # CC: Tweaked client script
 ```
