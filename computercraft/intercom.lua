@@ -55,21 +55,20 @@ end
 print("Connected!  Audio streaming.")
 print("Press Ctrl+T to disconnect.")
 print("")
+print("Packets received: 0")
 
 -- ── PCM decoder ──────────────────────────────────────────────────────────────
--- The companion sends little-endian signed 16-bit PCM at 48 000 Hz.
--- CC's speaker.playAudio expects a table of floats in the range [-1, 1].
-local function decode_pcm16(data)
-    local n       = math.floor(#data / 2)
+-- The companion sends signed 8-bit PCM at 48 000 Hz.
+-- speaker.playAudio expects amplitudes in the range -128..127.
+local function decode_pcm8(data)
+    local n       = #data
     local samples = {}
     for i = 1, n do
-        local lo  = data:byte(i * 2 - 1)
-        local hi  = data:byte(i * 2)
-        local raw = lo + hi * 256            -- unsigned 16-bit
-        if raw >= 32768 then
-            raw = raw - 65536               -- sign-extend to signed 16-bit
+        local raw = data:byte(i)
+        if raw >= 128 then
+            raw = raw - 256
         end
-        samples[i] = raw / 32767            -- normalise to [-1, 1]
+        samples[i] = raw
     end
     return samples
 end
@@ -77,6 +76,7 @@ end
 -- ── Shared audio buffer (receive thread → playback thread) ───────────────────
 local audio_buffer  = {}
 local MAX_BUFFERED  = 10   -- drop oldest chunks if we lag this far behind
+local packet_count  = 0
 
 -- ── Main loop (two parallel coroutines) ──────────────────────────────────────
 parallel.waitForAny(
@@ -92,17 +92,22 @@ parallel.waitForAny(
                 return
             end
 
-            if is_binary then
-                -- Binary frame: raw PCM bytes from the companion app
-                local samples = decode_pcm16(msg)
-                audio_buffer[#audio_buffer + 1] = samples
+            -- Some websocket stacks may deliver frames without preserving
+            -- the binary flag. Treat any non-nil payload as PCM bytes.
+            local samples = decode_pcm8(msg)
+            audio_buffer[#audio_buffer + 1] = samples
+            packet_count = packet_count + 1
 
-                -- Trim oldest chunks if playback falls behind
-                while #audio_buffer > MAX_BUFFERED do
-                    table.remove(audio_buffer, 1)
-                end
+            if packet_count == 1 or packet_count % 50 == 0 then
+                term.setCursorPos(1, 11)
+                term.clearLine()
+                write("Packets received: " .. packet_count)
             end
-            -- Text frames are silently ignored (reserved for future use)
+
+            -- Trim oldest chunks if playback falls behind
+            while #audio_buffer > MAX_BUFFERED do
+                table.remove(audio_buffer, 1)
+            end
         end
     end,
 
@@ -114,9 +119,8 @@ parallel.waitForAny(
 
                 -- speaker.playAudio returns false when its internal buffer is
                 -- full; wait for it to drain before retrying.
-                if not speaker.playAudio(samples) then
+                while not speaker.playAudio(samples, 3.0) do
                     os.pullEvent("speaker_audio_empty")
-                    speaker.playAudio(samples)
                 end
             else
                 -- Nothing buffered yet; yield briefly so the receive

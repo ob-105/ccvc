@@ -34,8 +34,9 @@ def _audio_callback(indata: np.ndarray, frames: int, time_info, status) -> None:
     if status:
         print(f"[audio] {status}", file=sys.stderr)
 
-    # Convert float32 [-1, 1] → int16 PCM bytes (little-endian)
-    pcm = (indata[:, 0] * 32767).astype(np.int16)
+    # Convert float32 [-1, 1] -> signed 8-bit PCM bytes (-128..127).
+    # CC speaker.playAudio expects 8-bit amplitudes at 48 kHz.
+    pcm = np.clip(indata[:, 0] * 127.0, -128, 127).astype(np.int8)
     raw = pcm.tobytes()
 
     # Hand off to the asyncio event loop safely from this background thread
