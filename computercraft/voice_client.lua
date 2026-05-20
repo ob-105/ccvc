@@ -32,8 +32,13 @@ local function saveConfig(url)
 end
 
 local function ensureScheme(url)
-    if not url:match("^wss?://") then
-        return "wss://" .. url
+    -- https:// or http:// → wss:// / ws://
+    if url:match("^https://") then
+        return url:gsub("^https://", "wss://")
+    elseif url:match("^http://") then
+        return url:gsub("^http://", "ws://")
+    elseif not url:match("^wss?://") then
+        return "wss://" .. url  -- bare domain → assume secure
     end
     return url
 end
@@ -72,9 +77,9 @@ end
 
 if not url then
     print()
-    print("Paste your Cloudflare Quick Tunnel URL.")
-    print("Example:  wss://abc-def-123.trycloudflare.com")
-    print("(HTTP or HTTPS host also accepted — wss:// added automatically)")
+    print("Open the CC Voice Chat app on your PC and copy")
+    print("the URL shown in the box at the top.")
+    print("(https://, wss://, or bare domain all work)")
     print()
     io.write("URL> ")
     url = trim(io.read())
